@@ -1,0 +1,33 @@
+# Example Configuration File for MF Secured Gateway
+# ================================================
+# Copy this file to 'mf-gateway.conf' and modify the values for your network
+#
+# cp mf-gateway.conf.example mf-gateway.conf
+# nano mf-gateway.conf
+
+# Internet Connection Settings
+# ---------------------------
+# The WiFi network that provides internet connectivity
+INTERNET_SSID="YourHomeWiFi"
+INTERNET_PASS="YourWiFiPassword"
+INTERNET_INTERFACE="wlan1"
+
+# Secured Gateway Settings
+# ------------------------
+# The WiFi network that will be created as a secured gateway
+GATEWAY_SSID="MFSecuredGateway"
+GATEWAY_PASS="SecureGatewayPassword123"
+GATEWAY_INTERFACE="wlan2"
+
+# Optional Advanced Settings
+# --------------------------
+# Uncomment and modify these if you need custom configurations
+# GATEWAY_CHANNEL="6"        # WiFi channel (1-13 for 2.4GHz, 36-165 for 5GHz)
+# GATEWAY_BAND="bg"         # Options: bg (2.4GHz), a (5GHz), or both
+# GATEWAY_MODE="ap"         # Options: ap (access point), ap-hotspot (hotspot mode)
+
+# Notes:
+# - Use strong passwords for security
+# - Choose channels that don't conflict with nearby networks
+# - 2.4GHz (bg) has better range, 5GHz (a) has better speed
+# - Interface names must be specified (e.g., wlan0, wlan1, wlan2, etc.) 
