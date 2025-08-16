@@ -20,15 +20,18 @@ CONFIG_FILE="./setup.conf"
 
 # --------- Load Parameters from .conf if it exists ---------
 if [ -f "$CONFIG_FILE" ]; then
-    echo "Loading parameters from $CONFIG_FILE..."
-    source "$CONFIG_FILE"
+  echo "Loading parameters from $CONFIG_FILE..."
+  source "$CONFIG_FILE"
 else
-    echo "No config file found. You will be prompted for input."
+  echo "No config file found. You will be prompted for input."
 fi
 
 # --------- User Input (fallback if variables not set) ---------
 : "${INTERNET_WIFI:=$(read -p 'Enter your Wi-Fi network name (SSID) for internet connection: ' ans && echo $ans)}"
-: "${INTERNET_PASS:=$(read -s -p 'Enter your Wi-Fi password: ' ans && echo $ans; echo)}"
+: "${INTERNET_PASS:=$(
+  read -s -p 'Enter your Wi-Fi password: ' ans && echo $ans
+  echo
+)}"
 : "${VPN_COUNTRY:=$(read -p 'Enter ProtonVPN country code (e.g., PL, NL, US): ' ans && echo $ans)}"
 : "${SSID1:=$(read -p 'SSID for first access point (wlan1): ' ans && echo $ans)}"
 : "${PASS1:=$(read -p 'Password for first AP: ' ans && echo $ans)}"
@@ -42,7 +45,7 @@ sudo apt install -y network-manager python3-venv python3-pip python3-setuptools 
 # --------- Setup Python Virtual Environment ---------
 VENV_DIR="$HOME/protonvpn-env"
 if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
+  python3 -m venv "$VENV_DIR"
 fi
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
@@ -54,10 +57,10 @@ sudo nmcli device wifi connect "$INTERNET_WIFI" password "$INTERNET_PASS" ifname
 
 # --------- ProtonVPN Initialization (first-time) ---------
 if ! protonvpn status >/dev/null 2>&1; then
-    echo "Initializing ProtonVPN CLI..."
-    sudo protonvpn init
-    echo "Please complete the initialization steps, including 2FA."
-    read -p "Press Enter after ProtonVPN initialization is complete..."
+  echo "Initializing ProtonVPN CLI..."
+  sudo protonvpn init
+  echo "Please complete the initialization steps, including 2FA."
+  read -p "Press Enter after ProtonVPN initialization is complete..."
 fi
 
 # --------- Connect to ProtonVPN server in chosen country ---------
@@ -68,22 +71,30 @@ sudo protonvpn connect --fastest --cc "$VPN_COUNTRY"
 sudo nmcli device set wlan1 managed yes
 sudo nmcli connection delete "$SSID1" 2>/dev/null || true
 sudo nmcli connection add type wifi ifname wlan1 con-name "$SSID1" autoconnect yes ssid "$SSID1"
-sudo nmcli connection modify "$SSID1" 802-11-wireless.mode ap
-sudo nmcli connection modify "$SSID1" 802-11-wireless.band bg
-sudo nmcli connection modify "$SSID1" ipv4.method shared
-sudo nmcli connection modify "$SSID1" wifi-sec.key-mgmt wpa-psk
-sudo nmcli connection modify "$SSID1" wifi-sec.psk "$PASS1"
+
+nmcli connection modify "$SSID1" \
+  connection.interface-name wlan1 \
+  802-11-wireless.mode ap \
+  802-11-wireless.band bg \
+  ipv4.method shared \
+  wifi-sec.key-mgmt wpa-psk \
+  wifi-sec.psk "$PASS1"
+
 sudo nmcli connection up "$SSID1"
 
 # --------- Setup Access Point on wlan2 ---------
 sudo nmcli device set wlan2 managed yes
 sudo nmcli connection delete "$SSID2" 2>/dev/null || true
 sudo nmcli connection add type wifi ifname wlan2 con-name "$SSID2" autoconnect yes ssid "$SSID2"
-sudo nmcli connection modify "$SSID2" 802-11-wireless.mode ap
-sudo nmcli connection modify "$SSID2" 802-11-wireless.band bg
-sudo nmcli connection modify "$SSID2" ipv4.method shared
-sudo nmcli connection modify "$SSID2" wifi-sec.key-mgmt wpa-psk
-sudo nmcli connection modify "$SSID2" wifi-sec.psk "$PASS2"
+
+nmcli connection modify "$SSID2" \
+  connection.interface-name wlan2 \
+  802-11-wireless.mode ap \
+  802-11-wireless.band bg \
+  ipv4.method shared \
+  wifi-sec.key-mgmt wpa-psk \
+  wifi-sec.psk "$PASS2"
+
 sudo nmcli connection up "$SSID2"
 
 # --------- Enable Auto-Connect for APs ---------
@@ -92,7 +103,7 @@ sudo nmcli connection modify "$SSID2" connection.autoconnect yes
 
 # --------- Create Systemd Service for VPN Auto-Connect ---------
 SERVICE_FILE="/etc/systemd/system/protonvpn-auto.service"
-sudo tee $SERVICE_FILE > /dev/null <<EOF
+sudo tee $SERVICE_FILE >/dev/null <<EOF
 [Unit]
 Description=ProtonVPN Auto Connect
 After=network-online.target
