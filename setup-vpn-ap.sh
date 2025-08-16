@@ -16,7 +16,7 @@ set -e
 #!/bin/bash
 set -e
 
-CONFIG_FILE="$HOME/setup.conf"
+CONFIG_FILE="./setup.conf"
 
 # --------- Load Parameters from .conf if it exists ---------
 if [ -f "$CONFIG_FILE" ]; then
@@ -46,7 +46,7 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
-pip install protonvpn
+pip install protonvpn-cli
 
 # --------- Connect wlan0 to Internet ---------
 echo "Connecting wlan0 to Wi-Fi network $INTERNET_WIFI..."
@@ -65,17 +65,25 @@ echo "Connecting to ProtonVPN server in $VPN_COUNTRY..."
 sudo protonvpn connect --fastest --cc "$VPN_COUNTRY"
 
 # --------- Setup Access Point on wlan1 ---------
-echo "Creating first access point ($SSID1)..."
+sudo nmcli device set wlan1 managed yes
 sudo nmcli connection delete "$SSID1" 2>/dev/null || true
 sudo nmcli connection add type wifi ifname wlan1 con-name "$SSID1" autoconnect yes ssid "$SSID1"
-sudo nmcli connection modify "$SSID1" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$PASS1"
+sudo nmcli connection modify "$SSID1" 802-11-wireless.mode ap
+sudo nmcli connection modify "$SSID1" 802-11-wireless.band bg
+sudo nmcli connection modify "$SSID1" ipv4.method shared
+sudo nmcli connection modify "$SSID1" wifi-sec.key-mgmt wpa-psk
+sudo nmcli connection modify "$SSID1" wifi-sec.psk "$PASS1"
 sudo nmcli connection up "$SSID1"
 
 # --------- Setup Access Point on wlan2 ---------
-echo "Creating second access point ($SSID2)..."
+sudo nmcli device set wlan2 managed yes
 sudo nmcli connection delete "$SSID2" 2>/dev/null || true
 sudo nmcli connection add type wifi ifname wlan2 con-name "$SSID2" autoconnect yes ssid "$SSID2"
-sudo nmcli connection modify "$SSID2" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$PASS2"
+sudo nmcli connection modify "$SSID2" 802-11-wireless.mode ap
+sudo nmcli connection modify "$SSID2" 802-11-wireless.band bg
+sudo nmcli connection modify "$SSID2" ipv4.method shared
+sudo nmcli connection modify "$SSID2" wifi-sec.key-mgmt wpa-psk
+sudo nmcli connection modify "$SSID2" wifi-sec.psk "$PASS2"
 sudo nmcli connection up "$SSID2"
 
 # --------- Enable Auto-Connect for APs ---------
