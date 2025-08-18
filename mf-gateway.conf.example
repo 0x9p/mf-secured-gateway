@@ -10,14 +10,21 @@
 # The WiFi network that provides internet connectivity
 INTERNET_SSID="YourHomeWiFi"
 INTERNET_PASS="YourWiFiPassword"
-INTERNET_INTERFACE="wlan1"
+INTERNET_INTERFACE="wlan0"
 
-# Secured Gateway Settings
-# ------------------------
-# The WiFi network that will be created as a secured gateway
-GATEWAY_SSID="MFSecuredGateway"
-GATEWAY_PASS="SecureGatewayPassword123"
-GATEWAY_INTERFACE="wlan2"
+# Secured Gateway 1 Settings
+# --------------------------
+# The first WiFi network that will be created as a secured gateway
+GATEWAY1_SSID="MFSecuredGateway1"
+GATEWAY1_PASS="SecureGatewayPassword123"
+GATEWAY1_INTERFACE="wlan1"
+
+# Secured Gateway 2 Settings
+# --------------------------
+# The second WiFi network that will be created as a secured gateway
+GATEWAY2_SSID="MFSecuredGateway2"
+GATEWAY2_PASS="SecureGatewayPassword456"
+GATEWAY2_INTERFACE="wlan2"
 
 # Optional Advanced Settings
 # --------------------------
@@ -26,8 +33,17 @@ GATEWAY_INTERFACE="wlan2"
 # GATEWAY_BAND="bg"         # Options: bg (2.4GHz), a (5GHz), or both
 # GATEWAY_MODE="ap"         # Options: ap (access point), ap-hotspot (hotspot mode)
 
+# WiFi Driver Configuration (Optional)
+# -----------------------------------
+# Uncomment and modify these if you need custom WiFi drivers
+# WIFI_DRIVER_INSTALL="true"
+# WIFI_DRIVER_NAME="8188eu"
+# WIFI_DRIVER_REPO="https://github.com/aircrack-ng/rtl8188eus.git"
+# WIFI_DRIVER_CONFLICT="rtl8xxxu"
+
 # Notes:
 # - Use strong passwords for security
 # - Choose channels that don't conflict with nearby networks
 # - 2.4GHz (bg) has better range, 5GHz (a) has better speed
-# - Interface names must be specified (e.g., wlan0, wlan1, wlan2, etc.) 
+# - Interface names must be specified (e.g., wlan0, wlan1, wlan2, etc.)
+# - WiFi drivers are installed at the beginning and persist after reboot 

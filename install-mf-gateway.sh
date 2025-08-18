@@ -8,7 +8,6 @@
 #
 # Author: 0x9p
 # Version: 2.0.0
-# License: MIT
 #
 
 set -euo pipefail  # Strict error handling
@@ -31,12 +30,24 @@ readonly NC='\033[0m' # No Color
 INTERNET_SSID=""
 INTERNET_PASS=""
 INTERNET_INTERFACE=""
-GATEWAY_SSID=""
-GATEWAY_PASS=""
-GATEWAY_INTERFACE=""
-GATEWAY_CHANNEL="1"
-GATEWAY_BAND="bg"
-GATEWAY_MODE="ap"
+GATEWAY1_SSID=""
+GATEWAY1_PASS=""
+GATEWAY1_INTERFACE=""
+GATEWAY1_CHANNEL="1"
+GATEWAY1_BAND="bg"
+GATEWAY1_MODE="ap"
+GATEWAY2_SSID=""
+GATEWAY2_PASS=""
+GATEWAY2_INTERFACE=""
+GATEWAY2_CHANNEL="6"
+GATEWAY2_BAND="bg"
+GATEWAY2_MODE="ap"
+
+# WiFi Driver Configuration
+WIFI_DRIVER_INSTALL="false"
+WIFI_DRIVER_NAME=""
+WIFI_DRIVER_REPO=""
+WIFI_DRIVER_CONFLICT=""
 
 # Logging Functions
 # =================
@@ -122,13 +133,124 @@ check_wifi_interfaces() {
         fi
     done < <(nmcli device)
     
-    if [[ ${#interfaces[@]} -lt 2 ]]; then
-        log_error "This script requires at least 2 WiFi interfaces"
+    if [[ ${#interfaces[@]} -lt 3 ]]; then
+        log_error "This script requires at least 3 WiFi interfaces"
         log_error "Found: ${interfaces[*]:-none}"
         exit 1
     fi
     
     log_info "Found WiFi interfaces: ${interfaces[*]}"
+}
+
+install_wifi_driver() {
+    if [[ "$WIFI_DRIVER_INSTALL" != "true" || -z "$WIFI_DRIVER_NAME" ]]; then
+        log_info "WiFi driver installation skipped"
+        return 0
+    fi
+    
+    log_info "Installing WiFi driver: $WIFI_DRIVER_NAME"
+    
+    # Check if driver is already loaded
+    if lsmod | grep -q "$WIFI_DRIVER_NAME"; then
+        log_info "Driver $WIFI_DRIVER_NAME is already loaded"
+        return 0
+    fi
+    
+    # Unload conflicting driver if specified
+    if [[ -n "$WIFI_DRIVER_CONFLICT" ]]; then
+        log_info "Unloading conflicting driver: $WIFI_DRIVER_CONFLICT"
+        if lsmod | grep -q "$WIFI_DRIVER_CONFLICT"; then
+            modprobe -r "$WIFI_DRIVER_CONFLICT" 2>/dev/null || true
+            log_success "Unloaded conflicting driver: $WIFI_DRIVER_CONFLICT"
+        else
+            log_info "Conflicting driver $WIFI_DRIVER_CONFLICT not loaded"
+        fi
+    fi
+    
+    # Install required packages for driver compilation
+    log_info "Installing build dependencies..."
+    apt install -y build-essential git dkms linux-headers-$(uname -r)
+    
+    # Clone driver repository if specified
+    if [[ -n "$WIFI_DRIVER_REPO" ]]; then
+        local driver_dir="/tmp/wifi-driver-${WIFI_DRIVER_NAME}"
+        
+        log_info "Cloning driver repository..."
+        if git clone "$WIFI_DRIVER_REPO" "$driver_dir"; then
+            log_success "Driver repository cloned successfully"
+        else
+            log_error "Failed to clone driver repository"
+            return 1
+        fi
+        
+        # Build and install driver
+        cd "$driver_dir"
+        if [[ -f "Makefile" ]]; then
+            log_info "Building driver..."
+            if make clean && make; then
+                log_success "Driver built successfully"
+                
+                # Install driver
+                if make install; then
+                    log_success "Driver installed successfully"
+                else
+                    log_error "Failed to install driver"
+                    return 1
+                fi
+            else
+                log_error "Failed to build driver"
+                return 1
+            fi
+        elif [[ -f "dkms.conf" ]]; then
+            log_info "Installing driver using DKMS..."
+            if dkms add . && dkms build "$WIFI_DRIVER_NAME" && dkms install "$WIFI_DRIVER_NAME"; then
+                log_success "Driver installed successfully using DKMS"
+            else
+                log_error "Failed to install driver using DKMS"
+                return 1
+            fi
+        else
+            log_error "No Makefile or dkms.conf found in driver directory"
+            return 1
+        fi
+        
+        # Clean up
+        cd /
+        rm -rf "$driver_dir"
+    else
+        # Try to install from package manager
+        log_info "Attempting to install driver from package manager..."
+        if apt install -y "$WIFI_DRIVER_NAME" 2>/dev/null; then
+            log_success "Driver installed from package manager"
+        else
+            log_warning "Driver not available in package manager, skipping"
+        fi
+    fi
+    
+    # Load the driver
+    log_info "Loading driver: $WIFI_DRIVER_NAME"
+    if modprobe "$WIFI_DRIVER_NAME"; then
+        log_success "Driver $WIFI_DRIVER_NAME loaded successfully"
+    else
+        log_error "Failed to load driver $WIFI_DRIVER_NAME"
+        return 1
+    fi
+    
+    # Make driver persistent after reboot
+    log_info "Making driver persistent after reboot..."
+    if ! grep -q "$WIFI_DRIVER_NAME" /etc/modules; then
+        echo "$WIFI_DRIVER_NAME" >> /etc/modules
+        log_success "Driver added to /etc/modules for persistence"
+    fi
+    
+    # Blacklist conflicting driver if specified
+    if [[ -n "$WIFI_DRIVER_CONFLICT" ]]; then
+        log_info "Blacklisting conflicting driver: $WIFI_DRIVER_CONFLICT"
+        if ! grep -q "$WIFI_DRIVER_CONFLICT" /etc/modprobe.d/blacklist.conf; then
+            echo "blacklist $WIFI_DRIVER_CONFLICT" >> /etc/modprobe.d/blacklist.conf
+            log_success "Conflicting driver blacklisted"
+        fi
+    fi
 }
 
 load_config() {
@@ -142,7 +264,7 @@ load_config() {
         fi
         
         # Validate required variables
-        local required_vars=("INTERNET_SSID" "INTERNET_PASS" "GATEWAY_SSID" "GATEWAY_PASS" "INTERNET_INTERFACE" "GATEWAY_INTERFACE")
+        local required_vars=("INTERNET_SSID" "INTERNET_PASS" "GATEWAY1_SSID" "GATEWAY1_PASS" "GATEWAY2_SSID" "GATEWAY2_PASS" "INTERNET_INTERFACE" "GATEWAY1_INTERFACE" "GATEWAY2_INTERFACE")
         local missing_vars=()
         
         for var in "${required_vars[@]}"; do
@@ -176,28 +298,73 @@ get_user_input() {
         echo
     fi
     
-    # Gateway details
-    if [[ -z "$GATEWAY_SSID" ]]; then
-        read -p "Enter SSID for secured gateway: " GATEWAY_SSID
+    # Gateway 1 details
+    if [[ -z "$GATEWAY1_SSID" ]]; then
+        read -p "Enter SSID for first secured gateway: " GATEWAY1_SSID
     fi
     
-    if [[ -z "$GATEWAY_PASS" ]]; then
-        read -s -p "Enter password for secured gateway: " GATEWAY_PASS
+    if [[ -z "$GATEWAY1_PASS" ]]; then
+        read -s -p "Enter password for first secured gateway: " GATEWAY1_PASS
+        echo
+    fi
+    
+    # Gateway 2 details
+    if [[ -z "$GATEWAY2_SSID" ]]; then
+        read -p "Enter SSID for second secured gateway: " GATEWAY2_SSID
+    fi
+    
+    if [[ -z "$GATEWAY2_PASS" ]]; then
+        read -s -p "Enter password for second secured gateway: " GATEWAY2_PASS
         echo
     fi
     
     # Interface configuration
     if [[ -z "$INTERNET_INTERFACE" ]]; then
-        read -p "Enter interface name for internet connection (e.g., wlan1): " INTERNET_INTERFACE
+        read -p "Enter interface name for internet connection (e.g., wlan0): " INTERNET_INTERFACE
     fi
     
-    if [[ -z "$GATEWAY_INTERFACE" ]]; then
-        read -p "Enter interface name for secured gateway (e.g., wlan2): " GATEWAY_INTERFACE
+    if [[ -z "$GATEWAY1_INTERFACE" ]]; then
+        read -p "Enter interface name for first secured gateway (e.g., wlan1): " GATEWAY1_INTERFACE
+    fi
+    
+    if [[ -z "$GATEWAY2_INTERFACE" ]]; then
+        read -p "Enter interface name for second secured gateway (e.g., wlan2): " GATEWAY2_INTERFACE
+    fi
+    
+    # WiFi driver configuration
+    echo
+    log_info "WiFi Driver Configuration"
+    echo "This will install custom WiFi drivers and unload conflicting ones."
+    echo
+    log_warning "If you proceed with driver installation, you need active Internet access."
+    log_warning "Use a wired Ethernet connection because WiFi may be unavailable until the driver is installed."
+    
+    read -p "Install custom WiFi driver? (y/N): " install_driver
+    if [[ "$install_driver" =~ ^[Yy]$ ]]; then
+        WIFI_DRIVER_INSTALL="true"
+        
+        if [[ -z "$WIFI_DRIVER_NAME" ]]; then
+            read -p "Enter WiFi driver name (e.g., rtl8188eus): " WIFI_DRIVER_NAME
+        fi
+        
+        if [[ -z "$WIFI_DRIVER_REPO" ]]; then
+            read -p "Enter driver repository URL (optional, press Enter to skip): " WIFI_DRIVER_REPO
+        fi
+        
+        if [[ -z "$WIFI_DRIVER_CONFLICT" ]]; then
+            read -p "Enter conflicting driver to unload (e.g., rtl8xxxu, press Enter to skip): " WIFI_DRIVER_CONFLICT
+        fi
     fi
     
     # Validate input
-    if [[ -z "$INTERNET_SSID" || -z "$INTERNET_PASS" || -z "$GATEWAY_SSID" || -z "$GATEWAY_PASS" || -z "$INTERNET_INTERFACE" || -z "$GATEWAY_INTERFACE" ]]; then
+    if [[ -z "$INTERNET_SSID" || -z "$INTERNET_PASS" || -z "$GATEWAY1_SSID" || -z "$GATEWAY1_PASS" || -z "$GATEWAY2_SSID" || -z "$GATEWAY2_PASS" || -z "$INTERNET_INTERFACE" || -z "$GATEWAY1_INTERFACE" || -z "$GATEWAY2_INTERFACE" ]]; then
         log_error "All fields are required"
+        exit 1
+    fi
+    
+    # Validate WiFi driver configuration if enabled
+    if [[ "$WIFI_DRIVER_INSTALL" == "true" && -z "$WIFI_DRIVER_NAME" ]]; then
+        log_error "WiFi driver name is required when driver installation is enabled"
         exit 1
     fi
     
@@ -206,10 +373,22 @@ get_user_input() {
     log_info "Configuration summary:"
     echo "  Internet SSID: $INTERNET_SSID"
     echo "  Internet Interface: $INTERNET_INTERFACE"
-    echo "  Gateway SSID: $GATEWAY_SSID"
-    echo "  Gateway Interface: $GATEWAY_INTERFACE"
-    echo "  Gateway Band: $GATEWAY_BAND"
-    echo "  Gateway Channel: $GATEWAY_CHANNEL"
+    echo "  Gateway 1 SSID: $GATEWAY1_SSID"
+    echo "  Gateway 1 Interface: $GATEWAY1_INTERFACE"
+    echo "  Gateway 1 Channel: $GATEWAY1_CHANNEL"
+    echo "  Gateway 2 SSID: $GATEWAY2_SSID"
+    echo "  Gateway 2 Interface: $GATEWAY2_INTERFACE"
+    echo "  Gateway 2 Channel: $GATEWAY2_CHANNEL"
+    
+    if [[ "$WIFI_DRIVER_INSTALL" == "true" ]]; then
+        echo "  WiFi Driver: $WIFI_DRIVER_NAME"
+        if [[ -n "$WIFI_DRIVER_REPO" ]]; then
+            echo "  Driver Repository: $WIFI_DRIVER_REPO"
+        fi
+        if [[ -n "$WIFI_DRIVER_CONFLICT" ]]; then
+            echo "  Conflicting Driver: $WIFI_DRIVER_CONFLICT"
+        fi
+    fi
     echo
     
     read -p "Proceed with this configuration? (y/N): " confirm
@@ -253,9 +432,25 @@ setup_internet_connection() {
 }
 
 setup_secured_gateway() {
-    local interface="$GATEWAY_INTERFACE"
+    log_info "Setting up secured gateways..."
     
-    log_info "Setting up secured gateway on $interface..."
+    # Setup Gateway 1
+    setup_single_gateway "$GATEWAY1_INTERFACE" "$GATEWAY1_SSID" "$GATEWAY1_PASS" "$GATEWAY1_CHANNEL" "$GATEWAY1_BAND" "$GATEWAY1_MODE" "1"
+    
+    # Setup Gateway 2
+    setup_single_gateway "$GATEWAY2_INTERFACE" "$GATEWAY2_SSID" "$GATEWAY2_PASS" "$GATEWAY2_CHANNEL" "$GATEWAY2_BAND" "$GATEWAY2_MODE" "2"
+}
+
+setup_single_gateway() {
+    local interface="$1"
+    local ssid="$2"
+    local password="$3"
+    local channel="$4"
+    local band="$5"
+    local mode="$6"
+    local gateway_num="$7"
+    
+    log_info "Setting up secured gateway $gateway_num on $interface..."
     
     # Check if interface exists
     if ! nmcli device show "$interface" &> /dev/null; then
@@ -267,34 +462,34 @@ setup_secured_gateway() {
     nmcli device set "$interface" managed yes
     
     # Remove existing connection if it exists
-    nmcli connection delete "$GATEWAY_SSID" 2>/dev/null || true
+    nmcli connection delete "$ssid" 2>/dev/null || true
     
     # Create new secured gateway connection
     nmcli connection add \
         type wifi \
         ifname "$interface" \
-        con-name "$GATEWAY_SSID" \
+        con-name "$ssid" \
         autoconnect yes \
-        ssid "$GATEWAY_SSID"
+        ssid "$ssid"
     
     # Configure secured gateway settings with enhanced security
-    nmcli connection modify "$GATEWAY_SSID" \
+    nmcli connection modify "$ssid" \
         connection.interface-name "$interface" \
-        802-11-wireless.mode "$GATEWAY_MODE" \
-        802-11-wireless.band "$GATEWAY_BAND" \
-        802-11-wireless.channel "$GATEWAY_CHANNEL" \
+        802-11-wireless.mode "$mode" \
+        802-11-wireless.band "$band" \
+        802-11-wireless.channel "$channel" \
         ipv4.method shared \
         wifi-sec.key-mgmt wpa-psk \
-        wifi-sec.psk "$GATEWAY_PASS" \
+        wifi-sec.psk "$password" \
         wifi-sec.pairwise ccmp \
         wifi-sec.group ccmp \
         wifi-sec.proto rsn
     
     # Enable the connection
-    if nmcli connection up "$GATEWAY_SSID"; then
-        log_success "Secured gateway $GATEWAY_SSID is now active"
+    if nmcli connection up "$ssid"; then
+        log_success "Secured gateway $gateway_num ($ssid) is now active"
     else
-        log_error "Failed to activate secured gateway"
+        log_error "Failed to activate secured gateway $gateway_num"
         exit 1
     fi
 }
@@ -316,7 +511,7 @@ show_status() {
     
     echo
     log_success "MF Secured Gateway installation is complete!"
-    log_info "Clients can now connect to '$GATEWAY_SSID' for secure access"
+    log_info "Clients can now connect to '$GATEWAY1_SSID' and '$GATEWAY2_SSID' for secure access"
     
     echo
     log_info "Security features enabled:"
@@ -368,6 +563,12 @@ main() {
     
     # Perform installation
     install_packages
+    
+    # Install WiFi driver first if enabled
+    if [[ "$WIFI_DRIVER_INSTALL" == "true" ]]; then
+        install_wifi_driver
+    fi
+    
     setup_internet_connection
     setup_secured_gateway
     show_status

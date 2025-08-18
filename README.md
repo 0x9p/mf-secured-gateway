@@ -1,6 +1,6 @@
 # MF Secured Gateway Network Installation Script
 
-A bash script for setting up a dual WiFi interface device to act as a **Secured Gateway**. This script connects one interface to an internet source and creates a highly secured access point on the second interface with enterprise-grade security features.
+A bash script for setting up a triple WiFi interface device to act as a **Dual Secured Gateway**. This script connects one interface to an internet source and creates two highly secured access points on the remaining interfaces with enterprise-grade security features.
 
 ## 🚀 **Key Features**
 
@@ -10,14 +10,15 @@ A bash script for setting up a dual WiFi interface device to act as a **Secured 
 - ⚙️ **Configuration Management**: Supports both config files and interactive input
 - 🔒 **Security**: Proper input validation, error checking, and secure defaults
 - 🎯 **Flexibility**: Command-line options and customizable settings
-- 📱 **Dual Interface Support**: Designed for devices with multiple WiFi interfaces
+- 📱 **Triple Interface Support**: Designed for devices with three WiFi interfaces
 
 ## 📋 **Requirements**
 
 - **Operating System**: Linux (tested on Ubuntu/Debian, Raspberry Pi OS)
-- **Hardware**: Device with at least 2 WiFi interfaces (e.g., wlan0, wlan1)
+- **Hardware**: Device with at least 3 WiFi interfaces (e.g., wlan0, wlan1, wlan2)
 - **Permissions**: Root access (use `sudo`)
 - **Dependencies**: NetworkManager (`nmcli`)
+- **Internet Access**: Required to install packages. If you enable WiFi driver installation, ensure Internet access via a wired Ethernet connection during installation, since WiFi may be unavailable until the driver is installed.
 
 ## 🚀 **Quick Start**
 
@@ -41,17 +42,28 @@ Edit `mf-gateway.conf` with your network details:
 # Internet Connection Settings
 INTERNET_SSID="YourWiFiNetwork"
 INTERNET_PASS="YourWiFiPassword"
-INTERNET_INTERFACE="wlan1"
+INTERNET_INTERFACE="wlan0"
 
-# Secured Gateway Settings
-GATEWAY_SSID="MFSecuredGateway"
-GATEWAY_PASS="SecureGatewayPassword"
-GATEWAY_INTERFACE="wlan2"
+# Secured Gateway 1 Settings
+GATEWAY1_SSID="MFSecuredGateway1"
+GATEWAY1_PASS="SecureGatewayPassword1"
+GATEWAY1_INTERFACE="wlan1"
+
+# Secured Gateway 2 Settings
+GATEWAY2_SSID="MFSecuredGateway2"
+GATEWAY2_PASS="SecureGatewayPassword2"
+GATEWAY2_INTERFACE="wlan2"
 
 # Optional Advanced Settings
 # GATEWAY_CHANNEL="6"
 # GATEWAY_BAND="bg"  # Options: bg (2.4GHz), a (5GHz)
 # GATEWAY_MODE="ap"  # Options: ap, ap-hotspot
+
+# WiFi Driver Configuration (Optional)
+# WIFI_DRIVER_INSTALL="true"
+# WIFI_DRIVER_NAME="rtl8188eus"
+# WIFI_DRIVER_REPO="https://github.com/aircrack-ng/rtl8188eus.git"
+# WIFI_DRIVER_CONFLICT="rtl8xxxu"
 ```
 
 ### **Option 2: Interactive Input**
@@ -99,17 +111,78 @@ sudo ./install-mf-gateway.sh -c /path/to/config.conf
 ./install-mf-gateway.sh --version
 ```
 
+## 🌐 **Dual Gateway Setup**
+
+This script creates two separate secured access points, providing enhanced network flexibility and capacity:
+
+### **Gateway Configuration**
+- **Gateway 1**: Primary secured access point on wlan1
+- **Gateway 2**: Secondary secured access point on wlan2
+- **Internet**: Single internet connection on wlan0
+
+### **Benefits of Dual Gateway**
+- **Load Balancing**: Distribute client connections across two networks
+- **Network Segmentation**: Separate networks for different purposes
+- **Redundancy**: Backup network if one gateway fails
+- **Capacity**: Handle more concurrent connections
+
+### **Channel Configuration**
+- **Gateway 1**: Default channel 1 (2.4GHz)
+- **Gateway 2**: Default channel 6 (2.4GHz)
+- **Non-overlapping**: Channels configured to avoid interference
+
+## 🔧 **WiFi Driver Installation**
+
+> Important: Driver installation occurs before WiFi is configured and requires Internet access for package installation and source downloads (apt, git). Ensure a wired Ethernet connection is active during this step.
+
+The script supports custom WiFi driver installation for compatibility with various WiFi adapters:
+
+### **Features**
+- **Universal Driver Support**: Install any WiFi driver from source or package manager
+- **Conflict Resolution**: Automatically unload conflicting drivers (e.g., rtl8xxxu)
+- **Persistence**: Drivers persist after reboot via `/etc/modules`
+- **Blacklisting**: Conflicting drivers are blacklisted to prevent conflicts
+
+### **Supported Installation Methods**
+- **Source Compilation**: Clone from Git repository and compile
+- **DKMS**: Dynamic Kernel Module Support for automatic rebuilds
+- **Package Manager**: Install pre-compiled drivers when available
+
+### **Example: RTL8188EUS Driver**
+```bash
+# Enable WiFi driver installation
+WIFI_DRIVER_INSTALL="true"
+
+# Specify driver name
+WIFI_DRIVER_NAME="rtl8188eus"
+
+# Git repository for driver source
+WIFI_DRIVER_REPO="https://github.com/aircrack-ng/rtl8188eus.git"
+
+# Conflicting driver to unload
+WIFI_DRIVER_CONFLICT="rtl8xxxu"
+```
+
+### **Installation Process**
+1. **Build Dependencies**: Installs required compilation tools
+2. **Driver Source**: Clones and compiles driver from repository
+3. **Driver Loading**: Loads the new driver into kernel
+4. **Persistence**: Adds driver to `/etc/modules` for boot loading
+5. **Conflict Resolution**: Unloads and blacklists conflicting drivers
+
 ## 🌐 **Network Topology**
 
 ```
 Internet Router
       │
       ▼
-   [wlan1] ← Internet Connection
+   [wlan0] ← Internet Connection
       │
    Device/Raspberry Pi
       │
-   [wlan2] ← Secured Gateway
+   [wlan1] ← Secured Gateway 1
+      │
+   [wlan2] ← Secured Gateway 2
       │
    Client Devices
 ```
