@@ -40,24 +40,27 @@ Edit `mf-gateway.conf` with your network details:
 
 ```bash
 # Internet Connection Settings
-INTERNET_SSID="YourWiFiNetwork"
-INTERNET_PASS="YourWiFiPassword"
-INTERNET_INTERFACE="wlan0"
+# INTERNET_SSID="YourWiFiNetwork"      # Uplink SSID (case-sensitive)
+# INTERNET_PASS="YourWiFiPassword"     # 8-63 chars WPA2/WPA3 passphrase
+# INTERNET_INTERFACE="wlan0"           # Interface for internet uplink
 
 # Secured Gateway 1 Settings
-GATEWAY1_SSID="MFSecuredGateway1"
-GATEWAY1_PASS="SecureGatewayPassword1"
-GATEWAY1_INTERFACE="wlan1"
+# GATEWAY1_SSID="MFSecuredGateway1"      # SSID shown to clients
+# GATEWAY1_PASS="SecureGatewayPassword1" # 8-63 chars WPA2-PSK
+# GATEWAY1_INTERFACE="wlan1"             # AP interface
 
 # Secured Gateway 2 Settings
-GATEWAY2_SSID="MFSecuredGateway2"
-GATEWAY2_PASS="SecureGatewayPassword2"
-GATEWAY2_INTERFACE="wlan2"
+# GATEWAY2_SSID="MFSecuredGateway2"      # SSID shown to clients
+# GATEWAY2_PASS="SecureGatewayPassword2" # 8-63 chars WPA2-PSK
+# GATEWAY2_INTERFACE="wlan2"             # AP interface
 
 # Optional Advanced Settings
-# GATEWAY_CHANNEL="6"
-# GATEWAY_BAND="bg"  # Options: bg (2.4GHz), a (5GHz)
-# GATEWAY_MODE="ap"  # Options: ap, ap-hotspot
+# GATEWAY1_MODE="ap"    # Options: ap (access point), ap-hotspot (hotspot mode)
+# GATEWAY2_MODE="ap"    # Options: ap (access point), ap-hotspot (hotspot mode)
+# GATEWAY1_CHANNEL="1"  # 2.4GHz: 1-13; 5GHz: use 36/40/44/48
+# GATEWAY2_CHANNEL="6"  # 2.4GHz: 1-13; 5GHz: use 36/40/44/48
+# GATEWAY1_BAND="bg"    # bg (2.4GHz); a (5GHz)
+# GATEWAY2_BAND="bg"    # bg (2.4GHz); a (5GHz)
 
 # WiFi Driver Configuration (Optional)
 # WIFI_DRIVER_INSTALL="true"
@@ -65,6 +68,44 @@ GATEWAY2_INTERFACE="wlan2"
 # WIFI_DRIVER_REPO="https://github.com/aircrack-ng/rtl8188eus.git"
 # WIFI_DRIVER_CONFLICT="rtl8xxxu"
 ```
+
+## 🔐 **VPN Routing via ProtonVPN (WireGuard)**
+
+When enabled, all traffic from the secured access points (`wlan1`, `wlan2`) is routed through a ProtonVPN WireGuard tunnel (`wg0`) over the internet uplink (`wlan0`).
+
+### Requirements
+- ProtonVPN account with WireGuard support
+- Downloaded WireGuard `.conf` from your ProtonVPN dashboard for Linux/Router
+- Active internet access (wired recommended during setup)
+
+### Where to get the WireGuard config (VPN_WG_CONF)
+- Sign in to your Proton account and open the ProtonVPN section.
+- Go to the area for WireGuard configuration downloads.
+- Generate a configuration for your device:
+  - Platform: choose Linux or Router
+  - Pick your desired server/location and options (e.g., NetShield if available)
+- Download the `.conf` file and supply its absolute path to `VPN_WG_CONF`.
+
+### How to Enable
+1. Set the following in `mf-gateway.conf`:
+   ```bash
+   VPN_ENABLE="true"
+   VPN_PROVIDER="protonvpn"
+   VPN_WG_CONF="/absolute/path/to/proton-wg0.conf"
+   VPN_AUTOSTART="true"
+   ```
+2. Run the installer. You can also enable and provide the path interactively.
+
+### What the script does
+- Installs `wireguard` and `iptables-persistent`
+- Deploys your config to `/etc/wireguard/wg0.conf` with `chmod 600`
+- Brings up `wg0` via `wg-quick up wg0` and optionally enables it on boot
+- Enables IPv4 forwarding and configures NAT/forwarding so clients on `wlan1` and `wlan2` egress via `wg0`
+
+### Notes
+- Your WireGuard config should include `AllowedIPs = 0.0.0.0/0, ::/0` to route all traffic
+- DNS in the config will apply to the device; client DNS is handled by NetworkManager sharing
+- To disable VPN routing later, set `VPN_ENABLE="false"` and re-run, or bring down with `wg-quick down wg0`
 
 ### **Option 2: Interactive Input**
 

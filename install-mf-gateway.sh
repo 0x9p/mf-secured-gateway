@@ -49,6 +49,12 @@ WIFI_DRIVER_NAME=""
 WIFI_DRIVER_REPO=""
 WIFI_DRIVER_CONFLICT=""
 
+# VPN Configuration (ProtonVPN WireGuard)
+VPN_ENABLE="false"
+VPN_PROVIDER="protonvpn"
+VPN_WG_CONF=""
+VPN_AUTOSTART="true"
+
 # Logging Functions
 # =================
 log_info() {
@@ -356,6 +362,26 @@ get_user_input() {
         fi
     fi
     
+    # VPN configuration
+    echo
+    log_info "ProtonVPN WireGuard Configuration"
+    echo "This will route all AP traffic through a ProtonVPN WireGuard tunnel (wg0)."
+    read -p "Enable ProtonVPN WireGuard? (y/N): " enable_vpn
+    if [[ "$enable_vpn" =~ ^[Yy]$ ]]; then
+        VPN_ENABLE="true"
+        if [[ -z "$VPN_WG_CONF" ]]; then
+            read -p "Enter path to ProtonVPN WireGuard config (.conf) for wg0: " VPN_WG_CONF
+        fi
+        if [[ -z "$VPN_AUTOSTART" ]]; then
+            read -p "Start VPN at boot? (Y/n): " vpn_autostart
+            if [[ "$vpn_autostart" =~ ^[Nn]$ ]]; then
+                VPN_AUTOSTART="false"
+            else
+                VPN_AUTOSTART="true"
+            fi
+        fi
+    fi
+
     # Validate input
     if [[ -z "$INTERNET_SSID" || -z "$INTERNET_PASS" || -z "$GATEWAY1_SSID" || -z "$GATEWAY1_PASS" || -z "$GATEWAY2_SSID" || -z "$GATEWAY2_PASS" || -z "$INTERNET_INTERFACE" || -z "$GATEWAY1_INTERFACE" || -z "$GATEWAY2_INTERFACE" ]]; then
         log_error "All fields are required"
@@ -388,6 +414,11 @@ get_user_input() {
         if [[ -n "$WIFI_DRIVER_CONFLICT" ]]; then
             echo "  Conflicting Driver: $WIFI_DRIVER_CONFLICT"
         fi
+    fi
+    if [[ "$VPN_ENABLE" == "true" ]]; then
+        echo "  VPN: ProtonVPN (WireGuard)"
+        echo "  WireGuard Config: $VPN_WG_CONF"
+        echo "  Autostart: $VPN_AUTOSTART"
     fi
     echo
     
@@ -433,12 +464,17 @@ setup_internet_connection() {
 
 setup_secured_gateway() {
     log_info "Setting up secured gateways..."
-    
-    # Setup Gateway 1
-    setup_single_gateway "$GATEWAY1_INTERFACE" "$GATEWAY1_SSID" "$GATEWAY1_PASS" "$GATEWAY1_CHANNEL" "$GATEWAY1_BAND" "$GATEWAY1_MODE" "1"
-    
-    # Setup Gateway 2
-    setup_single_gateway "$GATEWAY2_INTERFACE" "$GATEWAY2_SSID" "$GATEWAY2_PASS" "$GATEWAY2_CHANNEL" "$GATEWAY2_BAND" "$GATEWAY2_MODE" "2"
+
+    local eff_band1="${GATEWAY1_BAND:-bg}"
+    local eff_band2="${GATEWAY2_BAND:-bg}"
+    local eff_chan1="${GATEWAY1_CHANNEL:-1}"
+    local eff_chan2="${GATEWAY2_CHANNEL:-6}"
+
+    eff_chan1="$(validate_channel_for_band "$eff_chan1" "$eff_band1" "1")"
+    eff_chan2="$(validate_channel_for_band "$eff_chan2" "$eff_band2" "2")"
+
+    setup_single_gateway "$GATEWAY1_INTERFACE" "$GATEWAY1_SSID" "$GATEWAY1_PASS" "$eff_chan1" "$eff_band1" "$GATEWAY1_MODE" "1"
+    setup_single_gateway "$GATEWAY2_INTERFACE" "$GATEWAY2_SSID" "$GATEWAY2_PASS" "$eff_chan2" "$eff_band2" "$GATEWAY2_MODE" "2"
 }
 
 setup_single_gateway() {
@@ -520,6 +556,107 @@ show_status() {
     log_info "  - RSN security protocol"
 }
 
+validate_channel_for_band() {
+    local channel="$1"
+    local band="$2"
+    local gateway_num="$3"
+
+    # Normalize band string
+    case "$band" in
+        a|A|5g|5G|5ghz|5GHz)
+            band="a"
+            ;;
+        bg|BG|2.4g|2.4G|2.4ghz|2.4GHz)
+            band="bg"
+            ;;
+    esac
+
+    if [[ "$band" == "a" ]]; then
+        # Common 5GHz channels: 36, 40, 44, 48 (non-DFS) as safe defaults
+        case "$channel" in
+            36|40|44|48)
+                echo "$channel"
+                return 0
+                ;;
+            *)
+                log_warning "Gateway $gateway_num: Channel $channel is invalid for 5GHz band. Falling back to 36."
+                echo "36"
+                return 0
+                ;;
+        esac
+    else
+        # 2.4GHz valid channels 1-13 (region dependent). Default to 1/6.
+        if [[ "$channel" =~ ^([1-9]|1[0-3])$ ]]; then
+            echo "$channel"
+            return 0
+        else
+            local fallback="1"
+            if [[ "$gateway_num" == "2" ]]; then
+                fallback="6"
+            fi
+            log_warning "Gateway $gateway_num: Channel $channel is invalid for 2.4GHz band. Falling back to $fallback."
+            echo "$fallback"
+            return 0
+        fi
+    fi
+}
+
+setup_vpn_wireguard() {
+    if [[ "$VPN_ENABLE" != "true" ]]; then
+        return 0
+    fi
+
+    log_info "Setting up ProtonVPN WireGuard..."
+
+    if [[ -z "$VPN_WG_CONF" || ! -f "$VPN_WG_CONF" ]]; then
+        log_error "WireGuard config file not found: $VPN_WG_CONF"
+        return 1
+    fi
+
+    log_info "Installing WireGuard tools and persistence packages..."
+    apt install -y wireguard iptables-persistent
+
+    log_info "Deploying WireGuard config to /etc/wireguard/wg0.conf"
+    mkdir -p /etc/wireguard
+    cp "$VPN_WG_CONF" /etc/wireguard/wg0.conf
+    chmod 600 /etc/wireguard/wg0.conf
+
+    log_info "Bringing up wg0"
+    if wg-quick up wg0; then
+        log_success "wg0 is up"
+    else
+        log_error "Failed to bring up wg0"
+        return 1
+    fi
+
+    if [[ "$VPN_AUTOSTART" == "true" ]]; then
+        log_info "Enabling wg0 at boot"
+        systemctl enable [email protected]
+    fi
+
+    # Enable IP forwarding
+    log_info "Enabling IPv4 forwarding"
+    if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    fi
+    sysctl -p >/dev/null 2>&1 || true
+
+    # Route AP traffic through wg0 explicitly
+    log_info "Configuring NAT and forwarding via wg0"
+    iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE || true
+    iptables -A FORWARD -i "$GATEWAY1_INTERFACE" -o wg0 -j ACCEPT || true
+    iptables -A FORWARD -i "$GATEWAY2_INTERFACE" -o wg0 -j ACCEPT || true
+    iptables -A FORWARD -i wg0 -o "$GATEWAY1_INTERFACE" -m state --state ESTABLISHED,RELATED -j ACCEPT || true
+    iptables -A FORWARD -i wg0 -o "$GATEWAY2_INTERFACE" -m state --state ESTABLISHED,RELATED -j ACCEPT || true
+
+    # Persist rules if possible
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save || true
+    fi
+
+    log_success "ProtonVPN WireGuard routing is configured"
+}
+
 main() {
     # Initialize log file
     echo "$(date): Starting $SCRIPT_NAME v$SCRIPT_VERSION" > "$LOG_FILE"
@@ -570,6 +707,11 @@ main() {
     fi
     
     setup_internet_connection
+
+    # Optional: setup ProtonVPN WireGuard and route AP traffic via VPN
+    if [[ "$VPN_ENABLE" == "true" ]]; then
+        setup_vpn_wireguard
+    fi
     setup_secured_gateway
     show_status
     
